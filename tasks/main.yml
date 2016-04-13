@@ -1,0 +1,66 @@
+---
+# tasks file for ansible-role-sftp
+- name: Install vsftpd package from yum
+  yum: name=vsftpd state=latest
+
+- name: Configure Basic Settings for vsftpd
+  lineinfile:
+    dest: /etc/vsftpd/vsftpd.conf
+    regexp: "^{{ item.find }}"
+    line: "{{ item.replace }}"
+  with_items:
+      - { find: 'anonymous_enable=', replace: 'anonymous_enable=NO' }
+      - { find: 'local_enable=', replace: 'local_enable=YES' }
+      - { find: 'write_enable=', replace: 'write_enable=YES' }
+      - { find: 'chroot_local_user=', replace: 'chroot_local_user=YES' }
+
+- name: Add Local System User
+  user: 
+    name: zafinftp
+    generate_ssh_key: yes 
+    ssh_key_bits: 2048 
+    ssh_key_file: .ssh/id_rsa
+    password: $6$rounds=656000$gOo/kwYsN.fpAdeS$T1o10fiL4DwPW5t4yXRejK1NpfTP0.gAqsbKcmQHQHAKcw.1UwutoBxAFYTZOHajKCjLy.RDKfAJkR9M1xkNl/
+    update_password: always
+  register: key_out
+
+- debug: msg="{{ key_out.ssh_public_key }}"
+
+- name: Register Local SFTP User Public Key
+  authorized_key: 
+    user: zafinftp
+    key: "{{ key_out.ssh_public_key }}"
+
+- name: Create SSL Directory
+  file: 
+    path: /etc/ssl/private
+    state: directory 
+    mode: 0755
+
+- name: create self-signed SSL cert
+  command: openssl req -nodes -x509 -subj "/C=CA/ST=ONTARIO/L=TORONTO/O=IT/CN=sftp01-infra.zafintest.com" -days 3650 -newkey rsa:1024 -keyout /etc/ssl/private/vsftpd.key -out /etc/ssl/vsftpd.pem
+
+- name: Add the SSL Details to the vsftpd Configuration File
+  lineinfile:
+    dest: /etc/vsftpd/vsftpd.conf
+    regexp: "^{{ item.find }}"
+    line: "{{ item.replace }}"
+  with_items:
+      - { find: 'rsa_cert_file=', replace: 'rsa_cert_file=/etc/ssl/vsftpd.pem' }
+      - { find: 'rsa_private_key_file=', replace: 'rsa_private_key_file=/etc/ssl/private/vsftpd.key' }
+      - { find: 'ssl_enable=', replace: 'ssl_enable=YES' }
+      - { find: 'allow_anon_ssl=', replace: 'allow_anon_ssl=NO' }
+      - { find: 'force_local_data_ssl=', replace: 'force_local_data_ssl=YES' }
+      - { find: 'force_local_logins_ssl=', replace: 'force_local_logins_ssl=YES' }
+      - { find: 'ssl_tlsv1=', replace: 'ssl_tlsv1=YES' }
+      - { find: 'ssl_sslv2=', replace: 'ssl_sslv2=NO' }
+      - { find: 'ssl_sslv3=', replace: 'ssl_sslv3=NO' }
+      - { find: 'require_ssl_reuse=', replace: 'require_ssl_reuse=NO' }
+      - { find: 'ssl_ciphers=', replace: 'ssl_ciphers=HIGH' }
+      - { find: 'allow_writeable_chroot=', replace: 'allow_writeable_chroot=YES' }
+
+- name: Restarting vsftpd
+  service: 
+    name: vsftpd 
+    state: restarted
+    enabled: yes
